@@ -1,0 +1,168 @@
+---
+title: "Product Backorder Optimization"
+output: html_notebook
+---
+
+In this project, I'm going to use Machine Learning to Optimize the Product Backorders.
+
+##Introduction
+
+<b>Backorder</b> is an order which has not been fulfilled yet by company. It indicates the interest of consumer in the product even though the product is in short amount. This is both and good for the company. Good because it shows customer is still interested in the product and demands for it. Bad because if not fulfilled in time the consumer may lose interest, look for alternative product which will result in the loss of company, losing customers and image of the company may be distorted.
+
+Now, what company can do is built so many of the products that there won't be shortage. But most of the companies can't do it because of the high inventory cost. And if demand decreases, the will suffer quite a loss.
+
+So, it is better to look at the past data and optimize the current backorder such that the inventory cost is low, product is delivered in time before the conumer loses the interest. This will good for both consumers who get the product they want with only little wait and for company which retains the customers and make profit.
+
+There are a lot of challenges in building the predictive model for optimization of backorders. There are lot of factors which doesn't depend on the company, product or business but external factors like holiday, season, special occassions etc. So let's see what we are going to do.
+
+The data we are using here is obtained from Kaggle. You can obtain the data from [here](https://www.kaggle.com/tiredgeek/predict-bo-trial/).
+
+####Loading required libraries
+
+```{r}
+library(data.table)
+library(tidyquant)
+library(unbalanced)
+library(randomForest)
+library(caret)
+library(h2o)
+```
+
+####Reading the data
+```{r}
+train <- read.csv("train.csv", na.strings = "")
+test <- read.csv("test.csv", na.strings = "")
+```
+
+Let's have a look at the data
+
+```{r}
+str(train)
+str(test)
+```
+
+Let's have a look at the target variable 
+
+```{r}
+table(train$went_on_backorder)
+```
+As we can see the data is highly unbalanced data. Since, we are focused on optimizing the backorder, we need more occurance of backorder in our train data. So, we need to balance the data.
+
+
+####Data Pre-Processing
+```{r}
+summary(train)
+```
+```{r}
+head(train, 10)
+```
+
+```{r}
+tail(train)
+```
+
+```{r}
+train <- train[-nrow(train),-1]
+test <- test[-nrow(test),-1]
+```
+
+######Dealing with NAs
+```{r}
+train$lead_time <- ifelse(is.na(train$lead_time), -1, train$lead_time )
+train$went_on_backorder <- ifelse(train$went_on_backorder=="Yes",1,0)
+test$lead_time <- ifelse(is.na(test$lead_time), -1, test$lead_time )
+test$went_on_backorder <- ifelse(test$went_on_backorder=="Yes",1,0)
+train$went_on_backorder <- as.factor(train$went_on_backorder)
+test$went_on_backorder <- as.factor(test$went_on_backorder)
+```
+
+```{r}
+table(is.na(train))
+table(is.na(test))
+```
+
+Now, NA is gone, let's balance data. There are many ways to deal with unbalanced data. Here, I'm using SMOTE.
+
+```{r}
+train_bal <-  ubSMOTE(train[,-22], train[,22], perc.over = 200, perc.under = 200, k=5)
+```
+
+```{r}
+train_final <- cbind(train_bal$X, train_bal$Y)
+names(train_final)[22] <- "went_on_backorder"
+table(train_final$went_on_backorder)
+rm(train,train_bal)
+```
+
+Now, we can see the data is quite balanced. Also, as a added benefit, the data size has been reduced hugely which will make our training faster.
+
+####Modeling
+
+Now, let's move to the modeling.
+
+######Random Forest model
+
+```{r}
+fit.rf <- randomForest(went_on_backorder~., data = train_final)
+pred.rf <- predict(fit.rf,test[,-22])
+caret::confusionMatrix(test$went_on_backorder,pred.rf)
+```
+
+We can see the accuracy is pretty good, but we need to see other metrics.
+
+We will now train the model using H2O. It provides professional grade ML and scalibility. It also has a auto.ml function to automatically train model without providing a specific algorithm.
+
+```{r}
+h2o.init()
+```
+
+Let's create a validation dataset. Since, H2O deals with H2OFrame, we need to convert our data to that format.
+
+```{r}
+index <- createDataPartition(train_final$went_on_backorder, p=0.8, list = FALSE)
+train <- train_final[index,]
+valid <- train_final[-index,]
+
+train_h2o <- as.h2o(train)
+valid_h2o <- as.h2o(valid)
+test_h2o <- as.h2o(test)
+```
+
+Now, that we have transformed the data, we are going to use automl function from h2o package to train model.
+
+```{r}
+y <- "went_on_backorder"
+x <- setdiff(names(train_h2o), y)
+
+models_h2o <- h2o.automl(x=x, y=y, training_frame = train_h2o, validation_frame = valid_h2o, leaderboard_frame = test_h2o, max_runtime_secs = 60)
+```
+
+Model has been trained. Let's extract our model.
+
+```{r}
+fit.h2o <- models_h2o@leader
+```
+
+Let's predict using the model.
+
+```{r}
+pred.h2o <- h2o.predict(fit.h2o,newdata = test_h2o)
+as.data.frame(pred.h2o)
+```
+
+We have obtained the predictions. Now, H2O provides a function h2o.performance which can help to assess the perdormance. Let't try.
+
+```{r}
+performance.h2o <- h2o.performance(fit.h2o, newdata = test_h2o)
+h2o.metric(performance.h2o)
+```
+
+Let's see the AUC metric which is widely used in the business and challenges like Kaggle's.
+
+```{r}
+h2o.auc(performance.h2o)
+```
+
+It is 91% which is very good considering the minimum effort put in.
+
+So, we saw how h2o can help us get good performing model. It is also scalable so you can put the model in production. Also, we saw how to handle imbalanced dataset whenever required.
