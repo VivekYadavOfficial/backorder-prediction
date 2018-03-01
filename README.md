@@ -1,2 +1,2 @@
-# backorder-prediction
-Product Sales Backorder Prediction
+# Product Sales Backorder Prediction
+In this project, I have used the H2O's AutoML in R. It highly accurate for least effort. So, it is quite efficient. Also, in this project, I dealt with the highly unbalanced data using SMOTE. I created the RMarkdown in which all the code, outputs including visualization is present. Finally I knit the the HTML file from Rmd which can viewed in browser. The dataset used in this project is obtained from Kaggle. I didn't upload the dataset but you can download it from [here](https://www.kaggle.com/tiredgeek/predict-bo-trial).
